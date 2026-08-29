@@ -245,7 +245,7 @@ Screenshots will be added here to document the actual environment.
 
 ## 🏠 Homelab Dashboard
 
-![Home](images/Home.png)
+![Home](images/home.png)
 
 ---
 
@@ -257,13 +257,13 @@ Screenshots will be added here to document the actual environment.
 
 ## 🛡️ AdGuard Home
 
-![AdGuard](images/AdGuard.png)
+![AdGuard](images/adGuard.png)
 
 ---
 
 ## 🌐 Caddy / Reverse Proxy
 
-![Caddy](images/Caddy.png)
+![Caddy](images/caddy.png)
 
 ---
 
@@ -281,7 +281,7 @@ Screenshots will be added here to document the actual environment.
 
 ## 🟢 Uptime Kuma
 
-![Kuma](images/Kuma.png)
+![Kuma](images/kuma.png)
 
 ---
 

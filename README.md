@@ -245,43 +245,43 @@ Screenshots will be added here to document the actual environment.
 
 ## 🏠 Homelab Dashboard
 
-<!-- Add screenshot here -->
+![Home](images/Home.png)
 
 ---
 
 ## 🐳 Portainer
 
-<!-- Add screenshot here -->
+![Portainer](images/portainer.png)
 
 ---
 
 ## 🛡️ AdGuard Home
 
-<!-- Add screenshot here -->
+![AdGuard](images/AdGuard.png)
 
 ---
 
 ## 🌐 Caddy / Reverse Proxy
 
-<!-- Add screenshot here -->
+![Caddy](images/Caddy.png)
 
 ---
 
 ## 📈 Prometheus
 
-<!-- Add screenshot here -->
+![Prometheus](images/Prometheus.png)
 
 ---
 
 ## 📊 Grafana
 
-<!-- Add screenshot here -->
+![Grafana](images/Grafana.png)
 
 ---
 
 ## 🟢 Uptime Kuma
 
-<!-- Add screenshot here -->
+![Kuma](images/Kuma.png)
 
 ---
 

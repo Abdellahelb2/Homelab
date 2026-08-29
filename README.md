@@ -21,6 +21,7 @@ The environment includes:
 * 🏠 Homepage Dashboard
 * 📈 Prometheus
 * 📊 Grafana
+* 🔔 Grafana Alerting (Discord notifications)
 * 🟢 Uptime Kuma
 * 🖥️ Node Exporter
 
@@ -35,6 +36,7 @@ The project is designed to simulate a small infrastructure environment while pro
 * Metrics collection
 * Dashboard creation
 * Service availability monitoring
+* Alerting and notification pipelines
 * Troubleshooting distributed services
 
 ---
@@ -86,6 +88,14 @@ The current environment follows a simple architecture:
       ┌─────────────┐
       │   Grafana   │
       │ Dashboards  │
+      │ + Alerting  │
+      └──────┬──────┘
+             │
+             ▼
+      ┌─────────────┐
+      │   Discord   │
+      │   Webhook   │
+      │   Alerts    │
       └─────────────┘
 ```
 
@@ -104,6 +114,8 @@ The current environment follows a simple architecture:
 | **Uptime Kuma**   | Service availability monitoring      |
 | **Prometheus**    | Metrics collection and storage       |
 | **Grafana**       | Metrics visualization and dashboards |
+| **Grafana Alerting** | Alert rule evaluation and routing |
+| **Discord Webhook** | Real-time alert notifications      |
 | **Node Exporter** | Linux host metrics                   |
 
 ---
@@ -187,7 +199,7 @@ It also provides a practical introduction to how DNS infrastructure works inside
 
 The monitoring infrastructure is based on:
 
-**Prometheus + Node Exporter + Grafana + Uptime Kuma**
+**Prometheus + Node Exporter + Grafana + Grafana Alerting + Uptime Kuma**
 
 ### Prometheus
 
@@ -239,6 +251,60 @@ It allows the homelab to detect when a service becomes unavailable and provides 
 
 ---
 
+# 🔔 Alerting — Grafana + Discord Webhook
+
+To move from passively viewing dashboards to actively being notified of problems, **Grafana Alerting** is configured with a **Discord webhook contact point**, so alerts are pushed directly to a Discord channel as soon as a rule fires.
+
+### How it works
+
+```text
+Prometheus Metrics
+        │
+        ▼
+Grafana Alert Rules (evaluated on a schedule)
+        │
+        ▼
+  Condition met? ──► Firing
+        │
+        ▼
+Grafana Contact Point (Discord Webhook)
+        │
+        ▼
+  Discord Channel Notification
+```
+
+### Configuration
+
+* Alerts are organized under a dedicated **"Homelab Alerts"** folder in Grafana
+* A **Discord webhook URL** is configured as a contact point under Grafana → Alerting → Contact points
+* Notification policies route firing alerts from the Homelab Alerts folder to the Discord contact point
+* Each Discord message includes:
+  * Alert name and current state (Firing/Resolved)
+  * Query values
+  * Labels (e.g. `instance`, `job`, `datasource_uid`)
+  * Annotations (human-readable summary)
+  * A direct link back to the alert rule in Grafana
+  * A link to quickly silence the alert
+
+### Example alert rules
+
+| Alert Rule | Trigger Condition |
+| ---------- | ------------------ |
+| **Service Down** | Fires when a scrape target (e.g. `node-exporter:9100`) becomes unreachable |
+| **DatasourceNoData** | Fires when a query (e.g. disk usage) returns no data, often indicating an upstream scraping issue |
+
+### Why this matters
+
+This setup demonstrates practical experience with:
+
+* Configuring alert rules and evaluation intervals in Grafana
+* Setting up contact points and notification policies
+* Integrating external services (Discord) via webhooks
+* Diagnosing alert conditions like `NoData` versus genuine threshold breaches
+* Reducing reliance on manually checking dashboards by pushing alerts proactively
+
+---
+
 # 🖼️ Screenshots
 
 Screenshots will be added here to document the actual environment.
@@ -276,6 +342,12 @@ Screenshots will be added here to document the actual environment.
 ## 📊 Grafana
 
 ![Grafana](images/grafana.png)
+
+---
+
+## 🔔 Grafana Alerting (Discord)
+
+![Alerts](images/discord-alerts.png)
 
 ---
 
@@ -354,7 +426,15 @@ This led to investigating:
 * Docker networking
 * PromQL queries
 
-These problems provided practical experience debugging a monitoring stack rather than simply following a deployment tutorial.
+### Alerting Troubleshooting
+
+Setting up Grafana Alerting surfaced additional issues to debug, including:
+
+* `DatasourceNoData` firing when an exporter target went down, rather than the underlying metric genuinely crossing a threshold
+* Making sure alert rule labels (`instance`, `job`, `datasource_uid`) were specific enough to identify the exact failing component
+* Verifying the Discord webhook contact point delivered notifications correctly and that notification policies routed alerts from the right folder
+
+These problems provided practical experience debugging a monitoring and alerting stack rather than simply following a deployment tutorial.
 
 ---
 
@@ -388,14 +468,16 @@ Through this project, I developed practical experience with:
 * Port management
 * Network isolation
 
-### Monitoring
+### Monitoring & Alerting
 
 * Prometheus
 * PromQL
 * Grafana
+* Grafana Alerting (rules, contact points, notification policies)
+* Discord webhook integration
 * Node Exporter
 * Uptime monitoring
-* Metrics troubleshooting
+* Metrics and alert troubleshooting
 
 ### Infrastructure
 
@@ -420,7 +502,8 @@ Planned improvements include:
 * [ ] Add centralized logging
 * [ ] Implement automated backups
 * [ ] Improve Docker network architecture
-* [ ] Add alerting
+* [x] Add alerting (Grafana Alerting → Discord webhook)
+* [ ] Expand alerting coverage (e.g. container health, certificate expiry)
 * [ ] Add HTTPS certificates where appropriate
 * [ ] Automate deployments with Docker Compose
 * [ ] Add a dedicated NAS/storage service
@@ -444,6 +527,8 @@ Configure
 Connect
    ↓
 Monitor
+   ↓
+Alert
    ↓
 Troubleshoot
    ↓
@@ -470,6 +555,7 @@ homelab/
 │   ├── caddy.png
 │   ├── prometheus.png
 │   ├── grafana.png
+│   ├── discord-alerts.png
 │   └── uptime-kuma.png
 │
 ├── docker/
@@ -482,6 +568,10 @@ homelab/
 ├── prometheus/
 │   └── prometheus.yml
 │
+├── grafana/
+│   └── alerting/
+│       └── contact-points.yml
+│
 └── documentation/
     └── notes.md
 ```
@@ -490,18 +580,19 @@ homelab/
 
 # 📈 Status
 
-| Component     | Status     |
-| ------------- | ---------- |
-| Ubuntu Server | 🟢 Running |
-| Docker        | 🟢 Running |
-| Portainer     | 🟢 Running |
-| Caddy         | 🟢 Running |
-| AdGuard Home  | 🟢 Running |
-| Homepage      | 🟢 Running |
-| Uptime Kuma   | 🟢 Running |
-| Prometheus    | 🟢 Running |
-| Grafana       | 🟢 Running |
-| Node Exporter | 🟢 Running |
+| Component        | Status     |
+| ----------------- | ---------- |
+| Ubuntu Server     | 🟢 Running |
+| Docker            | 🟢 Running |
+| Portainer         | 🟢 Running |
+| Caddy             | 🟢 Running |
+| AdGuard Home      | 🟢 Running |
+| Homepage          | 🟢 Running |
+| Uptime Kuma       | 🟢 Running |
+| Prometheus        | 🟢 Running |
+| Grafana           | 🟢 Running |
+| Grafana Alerting → Discord | 🟢 Running |
+| Node Exporter     | 🟢 Running |
 
 ---
 
@@ -509,7 +600,7 @@ homelab/
 
 **Abdellah El Berdai**
 
-Software Engineer
+Software and Cybersecurity Engineer
 Morocco
 
 This homelab is a personal infrastructure project created to develop practical skills in **Linux, Docker, networking, monitoring, and infrastructure administration**.

@@ -257,7 +257,7 @@ Screenshots will be added here to document the actual environment.
 
 ## 🛡️ AdGuard Home
 
-![AdGuard](images/adGuard.png)
+![AdGuard](images/adguard.png)
 
 ---
 
@@ -269,13 +269,13 @@ Screenshots will be added here to document the actual environment.
 
 ## 📈 Prometheus
 
-![Prometheus](images/Prometheus.png)
+![Prometheus](images/prometheus.png)
 
 ---
 
 ## 📊 Grafana
 
-![Grafana](images/Grafana.png)
+![Grafana](images/grafana.png)
 
 ---
 

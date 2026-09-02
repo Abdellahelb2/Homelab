@@ -1,0 +1,21 @@
+# Runtime/state data — don't commit actual service data, TLS certs, DBs, etc.
+docker/adguard/work/*
+!docker/adguard/work/.gitkeep
+docker/adguard/conf/*
+!docker/adguard/conf/.gitkeep
+
+docker/caddy/data/*
+!docker/caddy/data/.gitkeep
+docker/caddy/config/*
+!docker/caddy/config/.gitkeep
+
+docker/homepage/*
+!docker/homepage/.gitkeep
+
+# Note: grafana-data, prometheus-data, portainer_data, and kuma-data are
+# Docker named volumes managed by Docker itself, not bind-mounted folders,
+# so there's nothing under docker/ to ignore for them.
+
+# Misc
+*.log
+.DS_Store

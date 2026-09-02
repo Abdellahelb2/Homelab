@@ -136,6 +136,149 @@ Docker networking is also used to allow containers to communicate with each othe
 
 ---
 
+# 📦 Docker Compose
+
+All services are deployed as containers on a shared external Docker network (`homelab`), which lets them reach each other by container name (Docker's internal DNS) instead of relying on host IPs or exposed ports.
+
+```yaml
+services:
+  adguardhome:
+    image: adguard/adguardhome:latest
+    container_name: adguardhome
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:3000/tcp"
+      - "8080:80/tcp"   # host 8080 -> container 80, avoids clash with Caddy on 80/443
+    volumes:
+      - ./adguard/work:/opt/adguardhome/work
+      - ./adguard/conf:/opt/adguardhome/conf
+    networks:
+      - homelab
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+    networks:
+      - homelab
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      - /:/host:ro
+    networks:
+      - homelab
+
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./homepage:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro  
+    environment:
+      PUID: 1000
+      PGID: 1000
+      HOMEPAGE_ALLOWED_HOSTS: home.home
+    networks:
+      - homelab
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=
+      - GF_SECURITY_ADMIN_PASSWORD=  
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - homelab
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    networks:
+      - homelab
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    command:
+      - "--trusted-origins"
+      - "192.168.x.x"   
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    volumes:
+      - portainer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock  
+    networks:
+      - homelab
+
+  kuma:
+    image: louislam/uptime-kuma:2
+    container_name: kuma
+    restart: unless-stopped
+    ports:
+      - "3002:3001"
+    volumes:
+      - kuma-data:/app/data   
+    networks:
+      - homelab
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  portainer_data:
+  kuma-data:
+
+networks:
+  homelab:
+    external: true
+```
+
+> ⚠️ Replace the placeholder Grafana password and Portainer trusted-origin IP above with your own values before deploying — don't leave `changeme` or `192.168.x.x` in a real deployment.
+
+### Deploying
+
+```bash
+cd docker
+docker network create homelab   
+docker compose up -d
+```
+
+The `Caddyfile` and `prometheus.yml` in this repo are starting points — adjust the `.home` hostnames and scrape targets to match your own network before deploying.
+
+---
+
+
 # 🌐 Reverse Proxy — Caddy
 
 **Caddy** acts as the central reverse proxy for the homelab.
@@ -400,6 +543,12 @@ Containers were initially distributed across different Docker networks, which ca
 
 This required investigating container network membership and ensuring that services that needed to communicate were connected to the appropriate network.
 
+For example, Grafana and Prometheus were initially deployed via Portainer stacks that omitted the `networks:` block, so Docker placed them on auto-created default networks (`grafana_default`, `prometheus_default`) instead of the shared `homelab` network. This was caught by comparing `docker network inspect homelab` against `docker ps`, then fixed by adding an explicit `networks: [homelab]` entry (with `homelab` declared as `external: true`) to each stack's compose definition in Portainer's Editor and redeploying.
+
+### Persistent Data
+
+Auditing each container's config with `docker inspect` also surfaced that Uptime Kuma had no volume mounted at all — all monitors and history were living only in the container's writable layer, meaning a container recreation would have wiped them. This was fixed by adding a named volume (`kuma-data:/app/data`) to the compose definition, a good reminder to check `Mounts` on every service rather than assuming persistence is in place just because a container has been running fine.
+
 ### Reverse Proxy Issues
 
 Caddy initially returned errors when it could not resolve certain Docker container names.
@@ -505,7 +654,7 @@ Planned improvements include:
 * [x] Add alerting (Grafana Alerting → Discord webhook)
 * [ ] Expand alerting coverage (e.g. container health, certificate expiry)
 * [ ] Add HTTPS certificates where appropriate
-* [ ] Automate deployments with Docker Compose
+* [x] Automate deployments with Docker Compose
 * [ ] Add a dedicated NAS/storage service
 * [ ] Add a Git-based CI/CD workflow
 * [ ] Document infrastructure configuration
@@ -541,12 +690,11 @@ The environment is continuously evolving as new technologies and services are te
 
 # 📁 Repository Structure
 
-A possible repository structure:
-
 ```text
 homelab/
 │
 ├── README.md
+├── .gitignore
 │
 ├── images/
 │   ├── homepage.png
@@ -559,18 +707,17 @@ homelab/
 │   └── uptime-kuma.png
 │
 ├── docker/
-│   ├── compose/
-│   └── configs/
-│
-├── caddy/
-│   └── Caddyfile
-│
-├── prometheus/
-│   └── prometheus.yml
-│
-├── grafana/
-│   └── alerting/
-│       └── contact-points.yml
+│   ├── docker-compose.yaml
+│   ├── adguard/
+│   │   ├── work/
+│   │   └── conf/
+│   ├── caddy/
+│   │   ├── Caddyfile
+│   │   ├── data/
+│   │   └── config/
+│   ├── homepage/
+│   └── prometheus/
+│       └── prometheus.yml
 │
 └── documentation/
     └── notes.md

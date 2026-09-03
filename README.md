@@ -48,7 +48,7 @@ The current environment follows a simple architecture:
 ```text
                          ┌─────────────────────┐
                          │     Ubuntu Server   │
-                         │        VM           │
+                         │        VM  (kali)   │
                          └──────────┬──────────┘
                                     │
                                     ▼
@@ -97,6 +97,17 @@ The current environment follows a simple architecture:
       │   Webhook   │
       │   Alerts    │
       └─────────────┘
+
+                    Backup (cron, daily @ 03:00)
+                         │
+                         ▼
+                  ┌──────────────┐        SFTP        ┌────────────────────┐
+                  │  backup.sh   │ ─────────────────► │  Lubuntu machine   │
+                  │  (on kali)   │   restic, key-auth  │  (backupuser)      │
+                  └──────────────┘                     │ /srv/backups/      │
+                                                        │   homelab (restic  │
+                                                        │   repository)      │
+                                                        └────────────────────┘
 ```
 
 ---
@@ -117,6 +128,7 @@ The current environment follows a simple architecture:
 | **Grafana Alerting** | Alert rule evaluation and routing |
 | **Discord Webhook** | Real-time alert notifications      |
 | **Node Exporter** | Linux host metrics                   |
+| **restic**        | Encrypted, deduplicated backups      |
 
 ---
 
@@ -277,7 +289,6 @@ docker compose up -d
 The `Caddyfile` and `prometheus.yml` in this repo are starting points — adjust the `.home` hostnames and scrape targets to match your own network before deploying.
 
 ---
-
 
 # 🌐 Reverse Proxy — Caddy
 
@@ -448,9 +459,87 @@ This setup demonstrates practical experience with:
 
 ---
 
-# 🖼️ Screenshots
+# 💾 Backup & Disaster Recovery
 
-Screenshots will be added here to document the actual environment.
+To avoid a single point of failure, the homelab's configuration and persistent data are backed up off-host to a **separate physical machine** (a spare laptop running Lubuntu) using **restic** over SFTP.
+
+### How it works
+
+```text
+kali (Docker host)
+   │
+   │  cron, daily @ 03:00
+   ▼
+backup.sh
+   │
+   ├── tar's Docker named volumes (grafana-data, prometheus-data,
+   │     portainer_data, kuma-data) via a throwaway alpine container
+   │
+   └── restic backup ─────────────► Lubuntu machine (backupuser, SFTP)
+                                          │
+                                          ▼
+                                    /srv/backups/homelab
+                                    (encrypted restic repository)
+```
+
+### Setup
+
+* Authentication is key-based SSH (ED25519), so backups run unattended with no password prompt
+* The Lubuntu machine's IP is reserved via a DHCP static lease on the router, so it doesn't drift
+* Config directories owned by root inside containers (AdGuard, Caddy) are made readable to the backup user via POSIX ACLs (`setfacl`), avoiding the need to run the backup script as root
+* Retention policy: `--keep-daily 7 --keep-weekly 4 --keep-monthly 6`, pruned automatically after each run
+* Scheduled via `cron`
+
+### Verification
+
+Backups are only useful if they can actually be restored — so a full backup → restore cycle was tested and verified, not just assumed to work.
+
+**A scheduled backup run, picking up changes since the previous snapshot:**
+
+```text
+using parent snapshot de867408
+
+Files:          16 new,     5 changed,    10 unmodified
+Dirs:           17 new,    11 changed,     2 unmodified
+Added to the repository: 4.786 MiB (1.523 MiB stored)
+
+processed 31 files, 4.796 MiB in 0:04
+snapshot 87031a48 saved
+```
+
+**Snapshot history, showing the retention policy applied correctly:**
+
+```text
+ID        Time                 Host    Paths                          Size
+----------------------------------------------------------------------------
+de867408  2026-09-03 15:16:24  kali    /home/kali/docker/adguard      35.219 KiB
+                                        /home/kali/docker/caddy
+                                        /home/kali/docker/homepage
+
+87031a48  2026-09-03 15:17:43  kali    /home/kali/docker/adguard      4.796 MiB
+                                        /home/kali/docker/caddy
+                                        /home/kali/docker/homepage
+----------------------------------------------------------------------------
+3 snapshots
+```
+
+**Restore test — confirming the backup is actually recoverable, not just stored:**
+
+```text
+restoring snapshot 87031a48 [...] to /tmp/restore-test
+Summary: Restored 57 files/dirs (4.796 MiB) in 0:01, skipped 4 files/dirs 348 B
+```
+
+### Lessons learned
+
+* `restic` over SFTP needs a working `sftp-server` binary and an uncommented `Subsystem sftp` line in `sshd_config` on the target machine
+* Running the backup script with `sudo` breaks path resolution (`~` resolves to `/root`) and uses root's SSH identity instead of the intended user's key — best avoided
+* Root-owned files written by containers (AdGuard, Caddy) aren't readable by a regular user by default; `setfacl` with default ACLs solves this without loosening ownership or needing sudo for every backup run
+* A DHCP reservation on the router keeps the backup target's IP stable, so the backup script and restic repository URL don't silently break after a router restart or lease renewal
+
+---
+
+# 🖼️ Screenshots
 
 ## 🏠 Homelab Dashboard
 
@@ -649,7 +738,7 @@ Planned improvements include:
 * [ ] Add more Prometheus exporters
 * [ ] Monitor Docker containers
 * [ ] Add centralized logging
-* [ ] Implement automated backups
+* [x] Implement automated backups (restic → off-host Lubuntu machine, restore-tested)
 * [ ] Improve Docker network architecture
 * [x] Add alerting (Grafana Alerting → Discord webhook)
 * [ ] Expand alerting coverage (e.g. container health, certificate expiry)
@@ -740,6 +829,7 @@ homelab/
 | Grafana           | 🟢 Running |
 | Grafana Alerting → Discord | 🟢 Running |
 | Node Exporter     | 🟢 Running |
+| Backups (restic → Lubuntu) | 🟢 Running |
 
 ---
 

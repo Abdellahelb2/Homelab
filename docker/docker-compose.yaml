@@ -39,6 +39,38 @@ services:
     networks:
       - homelab
 
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.5   # v0.49.x can't see containers with Docker's containerd image store
+    container_name: cadvisor
+    restart: unless-stopped
+    command:
+      - "--docker_only=true"
+      - "--housekeeping_interval=15s"
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - homelab
+
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+    volumes:
+      - ./navidrome/data:/data      # bind mount owned by UID 1000 (see troubleshooting)
+      - ~/music:/music:ro           # music library, read-only
+    networks:
+      - homelab
+
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
     container_name: homepage
@@ -47,7 +79,7 @@ services:
       - "3001:3000"
     volumes:
       - ./homepage:/app/config
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # read-only: lets Homepage discover container status
+      - /var/run/docker.sock:/var/run/docker.sock:ro  
     environment:
       PUID: 1000
       PGID: 1000
@@ -62,8 +94,8 @@ services:
     ports:
       - "3003:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=changeme   # change this before deploying
+      - GF_SECURITY_ADMIN_USER=
+      - GF_SECURITY_ADMIN_PASSWORD=  
     volumes:
       - grafana-data:/var/lib/grafana
     networks:
@@ -89,13 +121,13 @@ services:
     restart: always
     command:
       - "--trusted-origins"
-      - "192.168.x.x"   # replace with your homelab host's LAN IP
+      - "192.168.x.x"   
     ports:
       - "8000:8000"
       - "9443:9443"
     volumes:
       - portainer_data:/data
-      - /var/run/docker.sock:/var/run/docker.sock  # read-write: Portainer needs full control to manage containers
+      - /var/run/docker.sock:/var/run/docker.sock  
     networks:
       - homelab
 
@@ -106,7 +138,7 @@ services:
     ports:
       - "3002:3001"
     volumes:
-      - kuma-data:/app/data   # persists monitors/history
+      - kuma-data:/app/data   
     networks:
       - homelab
 

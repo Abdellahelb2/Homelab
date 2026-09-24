@@ -10,7 +10,7 @@ The goal of this project is to build and maintain a small production-like enviro
 
 ## 📌 Overview
 
-This homelab is currently running on an **Ubuntu Server virtual machine** and uses **Docker** to deploy and manage multiple infrastructure and monitoring services.
+This homelab is currently running on an **Ubuntu Server virtual machine** and uses **Docker** to deploy and manage multiple infrastructure, monitoring, and self-hosted services.
 
 The environment includes:
 
@@ -24,6 +24,8 @@ The environment includes:
 * 🔔 Grafana Alerting (Discord notifications)
 * 🟢 Uptime Kuma
 * 🖥️ Node Exporter
+* 📦 cAdvisor (container metrics)
+* 🎵 Navidrome (self-hosted music streaming)
 
 The project is designed to simulate a small infrastructure environment while providing hands-on experience with:
 
@@ -33,7 +35,7 @@ The project is designed to simulate a small infrastructure environment while pro
 * Reverse proxy configuration
 * DNS and local service discovery
 * Infrastructure monitoring
-* Metrics collection
+* Metrics collection (host and container level)
 * Dashboard creation
 * Service availability monitoring
 * Alerting and notification pipelines
@@ -48,7 +50,7 @@ The current environment follows a simple architecture:
 ```text
                          ┌─────────────────────┐
                          │     Ubuntu Server   │
-                         │        VM  (kali)   │
+                         │   VM (hostname:kali)│
                          └──────────┬──────────┘
                                     │
                                     ▼
@@ -66,37 +68,44 @@ The current environment follows a simple architecture:
        └──────┬──────┘       └─────────────┘       └─────────────┘
               │
               │
-      ┌───────┴──────────────────────────────────┐
-      │                                          │
-      ▼                                          ▼
-┌─────────────┐                          ┌─────────────┐
-│  Homepage   │                          │ Uptime Kuma │
-│  Dashboard  │                          │ Monitoring  │
-└─────────────┘                          └─────────────┘
+      ┌───────┴──────────────────────────────────────────┐
+      │                       │                          │
+      ▼                       ▼                          ▼
+┌─────────────┐        ┌─────────────┐            ┌─────────────┐
+│  Homepage   │        │ Uptime Kuma │            │  Navidrome  │
+│  Dashboard  │        │ Monitoring  │            │    Music    │
+└─────────────┘        └─────────────┘            └─────────────┘
 
                     Monitoring Stack
                          │
-             ┌───────────┴───────────┐
-             │                       │
-             ▼                       ▼
-      ┌─────────────┐         ┌─────────────┐
-      │ Prometheus  │◄────────│Node Exporter│
-      │   Metrics   │         │ Host Metrics│
-      └──────┬──────┘         └─────────────┘
-             │
-             ▼
-      ┌─────────────┐
-      │   Grafana   │
-      │ Dashboards  │
-      │ + Alerting  │
-      └──────┬──────┘
-             │
-             ▼
-      ┌─────────────┐
-      │   Discord   │
-      │   Webhook   │
-      │   Alerts    │
-      └─────────────┘
+        ┌────────────────┴────────────────┐
+        │                                 │
+        ▼                                 ▼
+ ┌─────────────┐                   ┌─────────────┐
+ │Node Exporter│                   │  cAdvisor   │
+ │ Host Metrics│                   │  Container  │
+ └──────┬──────┘                   │   Metrics   │
+        │                          └──────┬──────┘
+        └───────────────┬─────────────────┘
+                        ▼
+                 ┌─────────────┐
+                 │ Prometheus  │
+                 │   Metrics   │
+                 └──────┬──────┘
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │   Grafana   │
+                 │ Dashboards  │
+                 │ + Alerting  │
+                 └──────┬──────┘
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │   Discord   │
+                 │   Webhook   │
+                 │   Alerts    │
+                 └─────────────┘
 
                     Backup (cron, daily @ 03:00)
                          │
@@ -128,6 +137,8 @@ The current environment follows a simple architecture:
 | **Grafana Alerting** | Alert rule evaluation and routing |
 | **Discord Webhook** | Real-time alert notifications      |
 | **Node Exporter** | Linux host metrics                   |
+| **cAdvisor**      | Per-container CPU, memory, network and I/O metrics |
+| **Navidrome**     | Self-hosted music streaming (Subsonic-compatible) |
 | **restic**        | Encrypted, deduplicated backups      |
 
 ---
@@ -194,6 +205,38 @@ services:
     networks:
       - homelab
 
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.5   # v0.49.x can't see containers with Docker's containerd image store
+    container_name: cadvisor
+    restart: unless-stopped
+    command:
+      - "--docker_only=true"
+      - "--housekeeping_interval=15s"
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - homelab
+
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+    volumes:
+      - ./navidrome/data:/data      # bind mount owned by UID 1000 (see troubleshooting)
+      - ${MUSIC_PATH}:/music:ro     # music library, read-only
+    networks:
+      - homelab
+
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
     container_name: homepage
@@ -217,8 +260,8 @@ services:
     ports:
       - "3003:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=
-      - GF_SECURITY_ADMIN_PASSWORD=  
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - grafana-data:/var/lib/grafana
     networks:
@@ -244,7 +287,7 @@ services:
     restart: always
     command:
       - "--trusted-origins"
-      - "192.168.x.x"   
+      - "${PORTAINER_TRUSTED_ORIGIN}"
     ports:
       - "8000:8000"
       - "9443:9443"
@@ -276,12 +319,31 @@ networks:
     external: true
 ```
 
-> ⚠️ Replace the placeholder Grafana password and Portainer trusted-origin IP above with your own values before deploying — don't leave `changeme` or `192.168.x.x` in a real deployment.
+### Configuration with `.env`
+
+Secrets and machine-specific values are not hard-coded in the compose file. They are read from a `.env` file placed next to `docker-compose.yaml`, which is **excluded from Git** (`.gitignore`). The repository only contains a template, `.env.example`:
+
+```env
+# Grafana admin account (only applied on first start, when the database is created)
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=change-me-to-a-long-random-password
+
+# IP or hostname used to open Portainer in the browser
+PORTAINER_TRUSTED_ORIGIN=192.168.x.x
+
+# Absolute path of the music library mounted (read-only) in Navidrome
+MUSIC_PATH=/home/youruser/music
+```
+
+> ⚠️ Copy `.env.example` to `.env` and set real values before deploying. Never commit `.env`, and never leave the placeholder password in a real deployment.
+>
+> For stacks deployed through **Portainer**, the host's `.env` file is not read: enter the same variables in the stack's *Environment variables* section instead.
 
 ### Deploying
 
 ```bash
 cd docker
+cp .env.example .env      # then edit .env with your own values
 docker network create homelab   
 docker compose up -d
 ```
@@ -299,12 +361,13 @@ Instead of accessing services through different ports, services can be accessed 
 Example:
 
 ```text
-homepage.home
+home.home
 portainer.home
-adguardhome.home
+adguard.home
 kuma.home
 prometheus.home
 grafana.home
+navidrome.home
 ```
 
 The reverse proxy routes incoming requests to the appropriate Docker container.
@@ -317,17 +380,27 @@ Browser
    ▼
 Caddy
    │
-   ├── homepage.home ──────► Homepage
+   ├── home.home ──────────► Homepage
    │
-   ├── portainer.home ─────► Portainer
+   ├── portainer.home ─────► Portainer (HTTPS upstream, self-signed cert)
    │
-   ├── adguardhome.home ───► AdGuard Home
+   ├── adguard.home ───────► AdGuard Home
    │
    ├── kuma.home ──────────► Uptime Kuma
    │
    ├── prometheus.home ────► Prometheus
    │
-   └── grafana.home ───────► Grafana
+   ├── grafana.home ───────► Grafana
+   │
+   └── navidrome.home ─────► Navidrome
+```
+
+Each site block uses the explicit `http://` prefix (for example `http://navidrome.home`). Without it, Caddy tries to obtain a public certificate for a `.home` name via automatic HTTPS, which cannot work for a local-only domain.
+
+```text
+http://navidrome.home {
+    reverse_proxy navidrome:4533
+}
 ```
 
 This provides a cleaner and more realistic way of exposing internal services.
@@ -340,7 +413,7 @@ AdGuard Home is used as the DNS server for the homelab.
 
 Its main purposes are:
 
-* Local DNS resolution
+* Local DNS resolution (DNS rewrites map each `*.home` hostname to the Docker host)
 * Network-wide ad blocking
 * DNS request monitoring
 * Centralized DNS configuration
@@ -353,18 +426,27 @@ It also provides a practical introduction to how DNS infrastructure works inside
 
 The monitoring infrastructure is based on:
 
-**Prometheus + Node Exporter + Grafana + Grafana Alerting + Uptime Kuma**
+**Prometheus + Node Exporter + cAdvisor + Grafana + Grafana Alerting + Uptime Kuma**
 
 ### Prometheus
 
 Prometheus collects and stores time-series metrics from monitored services.
 
-The current configuration includes Prometheus itself and a Node Exporter target.
+The current configuration scrapes Prometheus itself, Node Exporter (host metrics) and cAdvisor (container metrics):
 
-Example target:
+```yaml
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
 
-```text
-node-exporter:9100
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']
 ```
 
 Prometheus uses a **15-second scrape interval**.
@@ -380,6 +462,17 @@ Node Exporter exposes Linux host-level metrics such as:
 * System load
 * Filesystem information
 
+### cAdvisor
+
+cAdvisor exposes **per-container** resource metrics (CPU, memory, network, block I/O) with a `name` label for each Docker container, for example:
+
+```text
+container_memory_usage_bytes{name="navidrome"}
+container_last_seen{name="grafana"}
+```
+
+It is not published on a host port: Prometheus reaches it through the shared `homelab` Docker network.
+
 ### Grafana
 
 Grafana is used to visualize the metrics collected by Prometheus.
@@ -394,6 +487,7 @@ Memory utilization
 Disk usage
 Network traffic
 System load
+Per-container CPU and memory
 Container/service health
 ```
 
@@ -435,7 +529,7 @@ Grafana Contact Point (Discord Webhook)
 * Each Discord message includes:
   * Alert name and current state (Firing/Resolved)
   * Query values
-  * Labels (e.g. `instance`, `job`, `datasource_uid`)
+  * Labels (e.g. `instance`, `job`, `datasource_uid`, `name`)
   * Annotations (human-readable summary)
   * A direct link back to the alert rule in Grafana
   * A link to quickly silence the alert
@@ -445,6 +539,7 @@ Grafana Contact Point (Discord Webhook)
 | Alert Rule | Trigger Condition |
 | ---------- | ------------------ |
 | **Service Down** | Fires when a scrape target (e.g. `node-exporter:9100`) becomes unreachable |
+| **Container down** | Fires when a container has not been seen by cAdvisor for more than 60 seconds: `time() - container_last_seen{name=~".+"} > 60` (1 minute pending period, one alert instance per container) |
 | **DatasourceNoData** | Fires when a query (e.g. disk usage) returns no data, often indicating an upstream scraping issue |
 
 ### Why this matters
@@ -452,10 +547,23 @@ Grafana Contact Point (Discord Webhook)
 This setup demonstrates practical experience with:
 
 * Configuring alert rules and evaluation intervals in Grafana
+* Writing PromQL-based conditions that produce one alert per container
 * Setting up contact points and notification policies
 * Integrating external services (Discord) via webhooks
 * Diagnosing alert conditions like `NoData` versus genuine threshold breaches
 * Reducing reliance on manually checking dashboards by pushing alerts proactively
+
+---
+
+# 🎵 Navidrome — Self-Hosted Music Streaming
+
+Navidrome is a lightweight, Subsonic-compatible music server, added as a service the homelab is actually used for day to day.
+
+* Deployed as a Portainer stack on the shared `homelab` network
+* Exposed only through Caddy at `navidrome.home` (no published host port)
+* The music library is mounted **read-only** (`:ro`) so the server can never modify the files
+* Works with Subsonic-compatible mobile apps (e.g. Symfonium, Substreamer)
+* Library files are added by copying DRM-free music to the mounted folder (`scp`/`rsync`/WinSCP), then triggering a scan
 
 ---
 
@@ -576,6 +684,11 @@ Summary: Restored 57 files/dirs (4.796 MiB) in 0:01, skipped 4 files/dirs 348 B
 ![Grafana](images/grafana.png)
 
 ---
+## 🟢 Cadvisor exporter
+
+![Cadvisor exporter](images/Cadvisor.png)
+
+---
 
 ## 🔔 Grafana Alerting (Discord)
 
@@ -586,6 +699,13 @@ Summary: Restored 57 files/dirs (4.796 MiB) in 0:01, skipped 4 files/dirs 348 B
 ## 🟢 Uptime Kuma
 
 ![Kuma](images/kuma.png)
+
+---
+
+
+## 🎵 navidrome
+
+![navidrome](images/navidrome.png)
 
 ---
 
@@ -606,7 +726,8 @@ Caddy
   ├── adguardhome:80
   ├── kuma:3001
   ├── prometheus:9090
-  └── grafana:3000
+  ├── grafana:3000
+  └── navidrome:4533
 ```
 
 This setup provided practical experience troubleshooting:
@@ -644,6 +765,16 @@ Caddy initially returned errors when it could not resolve certain Docker contain
 
 This demonstrated the importance of understanding Docker's internal DNS and network isolation.
 
+A later **502 Bad Gateway** on `navidrome.home` looked like a Caddy problem but was not: the DNS record and the Caddyfile were correct, and the upstream container was crash-looping. Checking `docker ps -a` and `docker logs` first (instead of editing the proxy config) found the real cause in a few seconds. Two other Caddy details worth remembering: local `.home` sites need the explicit `http://` prefix to avoid automatic HTTPS, and an HTTPS upstream such as Portainer needs `tls_insecure_skip_verify` because of its self-signed certificate.
+
+### Container Permissions (Navidrome)
+
+Navidrome crash-looped at startup with `unable to open database file: no such file or directory`, even though the message suggests a missing path. The real cause was permissions: a Docker named volume is created owned by `root`, while the container ran as `user: "1000:1000"`, so it could not create its SQLite database in `/data`. The fix was to use a bind-mounted directory owned by UID 1000 instead of a root-owned named volume, keeping the container unprivileged.
+
+### cAdvisor and Docker's containerd image store
+
+cAdvisor v0.49.1 started and answered scrapes, but logged `failed to identify the read-write layer ID` for every container, and no metric carried a `name` label, so all per-container dashboards would have been empty. The cause: Docker's containerd image store no longer keeps the `layerdb/mounts/<id>/mount-id` files that older cAdvisor versions read. Upgrading to a recent release (v0.60.5, published on `ghcr.io`) fixed it. After the upgrade, `container_memory_usage_bytes{name!=""}` returned one series per container. The lesson: a target showing **UP** in Prometheus only proves the scrape works, not that the data is useful, so always query the metrics themselves.
+
 ### Port Conflicts
 
 Some services attempted to use ports that were already occupied by other applications.
@@ -664,6 +795,8 @@ This led to investigating:
 * Docker networking
 * PromQL queries
 
+Another detail: after editing `prometheus.yml`, all targets briefly showed `unknown / never scraped` until the first 15-second scrape completed, and it is important to edit the file that the container actually mounts (the bind-mount path in the stack definition), not another copy of it.
+
 ### Alerting Troubleshooting
 
 Setting up Grafana Alerting surfaced additional issues to debug, including:
@@ -671,6 +804,7 @@ Setting up Grafana Alerting surfaced additional issues to debug, including:
 * `DatasourceNoData` firing when an exporter target went down, rather than the underlying metric genuinely crossing a threshold
 * Making sure alert rule labels (`instance`, `job`, `datasource_uid`) were specific enough to identify the exact failing component
 * Verifying the Discord webhook contact point delivered notifications correctly and that notification policies routed alerts from the right folder
+* Building the container alert on `container_last_seen`: once a container stops, its series eventually disappears from Prometheus, so the rule's no-data handling has to be set deliberately to keep the alert firing instead of silently going to `NoData`
 
 These problems provided practical experience debugging a monitoring and alerting stack rather than simply following a deployment tutorial.
 
@@ -687,6 +821,7 @@ Through this project, I developed practical experience with:
 * Networking
 * System troubleshooting
 * File and configuration management
+* File ownership and permissions
 
 ### Docker
 
@@ -696,6 +831,8 @@ Through this project, I developed practical experience with:
 * Port mapping
 * Docker DNS
 * Container troubleshooting
+* Bind mounts vs named volumes
+* Reading container logs to diagnose crash loops
 
 ### Networking
 
@@ -714,6 +851,7 @@ Through this project, I developed practical experience with:
 * Grafana Alerting (rules, contact points, notification policies)
 * Discord webhook integration
 * Node Exporter
+* cAdvisor and container-level monitoring
 * Uptime monitoring
 * Metrics and alert troubleshooting
 
@@ -724,6 +862,7 @@ Through this project, I developed practical experience with:
 * Infrastructure organization
 * Monitoring and observability
 * Troubleshooting distributed services
+* Backup and restore validation
 
 ---
 
@@ -735,13 +874,13 @@ Planned improvements include:
 
 * [ ] Add additional DNS/networking services
 * [ ] Improve Grafana dashboards
-* [ ] Add more Prometheus exporters
-* [ ] Monitor Docker containers
+* [x] Add more Prometheus exporters (cAdvisor)
+* [x] Monitor Docker containers (cAdvisor + Grafana)
 * [ ] Add centralized logging
 * [x] Implement automated backups (restic → off-host Lubuntu machine, restore-tested)
 * [ ] Improve Docker network architecture
 * [x] Add alerting (Grafana Alerting → Discord webhook)
-* [ ] Expand alerting coverage (e.g. container health, certificate expiry)
+* [ ] Expand alerting coverage (container health ✅, certificate expiry ⏳)
 * [ ] Add HTTPS certificates where appropriate
 * [x] Automate deployments with Docker Compose
 * [ ] Add a dedicated NAS/storage service
@@ -783,7 +922,7 @@ The environment is continuously evolving as new technologies and services are te
 homelab/
 │
 ├── README.md
-├── .gitignore
+├── .gitignore          # excludes docker/.env
 │
 ├── images/
 │   ├── homepage.png
@@ -797,6 +936,7 @@ homelab/
 │
 ├── docker/
 │   ├── docker-compose.yaml
+│   ├── .env.example
 │   ├── adguard/
 │   │   ├── work/
 │   │   └── conf/
@@ -805,6 +945,8 @@ homelab/
 │   │   ├── data/
 │   │   └── config/
 │   ├── homepage/
+│   ├── navidrome/
+│   │   └── data/
 │   └── prometheus/
 │       └── prometheus.yml
 │
@@ -829,6 +971,8 @@ homelab/
 | Grafana           | 🟢 Running |
 | Grafana Alerting → Discord | 🟢 Running |
 | Node Exporter     | 🟢 Running |
+| cAdvisor          | 🟢 Running |
+| Navidrome         | 🟢 Running |
 | Backups (restic → Lubuntu) | 🟢 Running |
 
 ---
@@ -837,7 +981,7 @@ homelab/
 
 **Abdellah El Berdai**
 
-Software and Cybersecurity Engineer
+Networking & Cybersecurity engineering student
 Morocco
 
 This homelab is a personal infrastructure project created to develop practical skills in **Linux, Docker, networking, monitoring, and infrastructure administration**.

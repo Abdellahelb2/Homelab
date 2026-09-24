@@ -15,7 +15,11 @@ docker/homepage/*
 # Note: grafana-data, prometheus-data, portainer_data, and kuma-data are
 # Docker named volumes managed by Docker itself, not bind-mounted folders,
 # so there's nothing under docker/ to ignore for them.
-
+adguard/work/
+adguard/conf/
+caddy/data/
+caddy/config/
+navidrome/data/
 # Misc
 *.log
 .DS_Store
